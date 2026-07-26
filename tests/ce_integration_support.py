@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+OFFICIAL_CE_REMOTE = "https://github.com/rezahh107/EV4-Constructability-Engineer-Repo.git"
+
 
 def ce_root() -> Path:
     value = os.environ.get("EV4_CE_REPO")
@@ -20,6 +22,10 @@ def independent_clone(tmp_path: Path) -> Path:
     target = tmp_path / "ce-clone"
     subprocess.run(["git", "clone", "--quiet", "--no-hardlinks", str(root), str(target)], check=True)
     subprocess.run(["git", "-C", str(target), "checkout", "--quiet", "main"], check=True)
+    subprocess.run(
+        ["git", "-C", str(target), "remote", "set-url", "origin", OFFICIAL_CE_REMOTE],
+        check=True,
+    )
     return target
 
 
