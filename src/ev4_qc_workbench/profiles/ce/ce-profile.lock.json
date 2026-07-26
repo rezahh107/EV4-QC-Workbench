@@ -1,0 +1,20 @@
+{
+  "acceptance_mode": "exact_commit",
+  "official_cli_options": [
+    "--review-draft",
+    "--source-intake",
+    "--source-bundle",
+    "--output",
+    "--repo-root",
+    "--overwrite"
+  ],
+  "profile_id": "ce",
+  "public_entry_point": "main",
+  "public_module": "validator.verified_project_gate_exporter",
+  "public_script": "ev4-ce-project-gate-export",
+  "repository": "rezahh107/EV4-Constructability-Engineer-Repo",
+  "required_commit": "0e7d8756c8452113d42e8f50fc9489b240a01bfe",
+  "schema_version": "1.0",
+  "verified_exporter_id": "ev4-producer-gate-export-validator",
+  "verified_exporter_version": "1.0.0"
+}

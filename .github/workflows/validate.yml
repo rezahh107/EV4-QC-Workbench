@@ -1,0 +1,91 @@
+name: validate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  windows-exact-head:
+    runs-on: windows-latest
+    env:
+      WORKBENCH_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      CE_REQUIRED_SHA: 0e7d8756c8452113d42e8f50fc9489b240a01bfe
+    steps:
+      - name: Checkout exact Workbench head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.WORKBENCH_HEAD_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Assert exact Workbench head
+        shell: pwsh
+        run: |
+          if ((git rev-parse HEAD) -ne $env:WORKBENCH_HEAD_SHA) { throw "Workbench exact-head mismatch" }
+          if ((git status --porcelain) -ne $null) { throw "Workbench checkout is not clean" }
+
+      - name: Checkout locked CE main
+        uses: actions/checkout@v4
+        with:
+          repository: rezahh107/EV4-Constructability-Engineer-Repo
+          ref: main
+          path: EV4-Constructability-Engineer-Repo
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Assert exact clean CE dependency
+        shell: pwsh
+        run: |
+          $ce = Join-Path $env:GITHUB_WORKSPACE "EV4-Constructability-Engineer-Repo"
+          if ((git -C $ce rev-parse HEAD) -ne $env:CE_REQUIRED_SHA) { throw "CE evidence lock invalidated" }
+          git -C $ce diff --quiet HEAD --
+          if ($LASTEXITCODE -ne 0) { throw "CE tracked working tree is dirty" }
+          git -C $ce diff --cached --quiet
+          if ($LASTEXITCODE -ne 0) { throw "CE index is dirty" }
+          "EV4_CE_REPO=$ce" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install locked Workbench environment
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.lock
+          python -m pip install -e . --no-deps
+
+      - name: Compile production and tests
+        run: python -m compileall -q src tests
+
+      - name: Run Profile lock, registry, transport, snapshot, and import-boundary tests
+        run: pytest -q tests/test_profile_registry.py tests/test_ce_profile_lock.py tests/test_strict_json.py tests/test_process_transport.py tests/test_attempts.py tests/test_parent_import_boundary.py
+
+      - name: Run exact CE connection and tracked-state integration
+        run: pytest -q -m integration tests/test_ce_connection_integration.py
+
+      - name: Run official CE authorized, blocked, and invalid integration
+        run: pytest -q -m integration tests/test_ce_export_integration.py
+
+      - name: Run GUI workflow test
+        run: pytest -q tests/test_gui_workflow.py
+
+      - name: Run full Workbench suite
+        run: pytest -q
+
+      - name: Verify CE dependency remains unchanged
+        shell: pwsh
+        run: |
+          $ce = $env:EV4_CE_REPO
+          if ((git -C $ce rev-parse HEAD) -ne $env:CE_REQUIRED_SHA) { throw "CE Head changed" }
+          git -C $ce diff --quiet HEAD --
+          if ($LASTEXITCODE -ne 0) { throw "CE tracked working tree changed" }
+          git -C $ce diff --cached --quiet
+          if ($LASTEXITCODE -ne 0) { throw "CE index changed" }
+
+      - name: Check patch whitespace
+        run: git diff --check
