@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 
 OFFICIAL_CE_REMOTE = "https://github.com/rezahh107/EV4-Constructability-Engineer-Repo.git"
+REQUIRED_CE_BRANCH = "fix/ce-external-output-boundary"
+REQUIRED_CE_COMMIT = "ff40b2a9d801f34aad03829d0c1c24d85b5d7f08"
 
 
 def ce_root() -> Path:
@@ -21,7 +23,8 @@ def independent_clone(tmp_path: Path) -> Path:
     root = ce_root()
     target = tmp_path / "ce-clone"
     subprocess.run(["git", "clone", "--quiet", "--no-hardlinks", str(root), str(target)], check=True)
-    subprocess.run(["git", "-C", str(target), "checkout", "--quiet", "main"], check=True)
+    subprocess.run(["git", "-C", str(target), "checkout", "--quiet", REQUIRED_CE_BRANCH], check=True)
+    assert subprocess.check_output(["git", "-C", str(target), "rev-parse", "HEAD"], text=True).strip() == REQUIRED_CE_COMMIT
     subprocess.run(
         ["git", "-C", str(target), "remote", "set-url", "origin", OFFICIAL_CE_REMOTE],
         check=True,
