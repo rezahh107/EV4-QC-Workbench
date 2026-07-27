@@ -61,7 +61,7 @@ The validation workflow checks the exact Workbench PR Head against the named CE 
 ## Validation
 
 ```text
-python -m pip install -e "[dev]"
+python -m pip install -e ".[dev]"
 python -m compileall -q src tests
 pytest -q
 git diff --check
