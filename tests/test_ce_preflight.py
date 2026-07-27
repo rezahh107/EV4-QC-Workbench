@@ -28,6 +28,18 @@ def _forbid_attempt(*args, **kwargs):
     raise AssertionError("create_attempt must not run for CE path-boundary rejection")
 
 
+def _directory_symlink_to_ce(tmp_path: Path, ce_root: Path) -> Path:
+    link = tmp_path / "ce-link"
+    try:
+        link.symlink_to(ce_root, target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:
+        if os.name == "nt":
+            pytest.skip(f"directory symlink fixture unavailable on Windows: {exc}")
+        raise
+    assert link.resolve(strict=True) == ce_root.resolve(strict=True)
+    return link
+
+
 @pytest.mark.parametrize("nested", [False, True], ids=["equal-root", "below-root"])
 def test_output_folder_inside_ce_is_rejected_before_attempt(
     tmp_path: Path,
@@ -96,19 +108,13 @@ def test_original_input_inside_ce_is_rejected_before_any_write(
     assert not output_folder.exists()
 
 
-def test_existing_directory_symlink_resolving_into_ce_is_rejected(
+def test_existing_directory_symlink_output_resolving_into_ce_is_rejected(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ce_root = tmp_path / "ce"
     ce_root.mkdir()
-    link = tmp_path / "ce-link"
-    try:
-        link.symlink_to(ce_root, target_is_directory=True)
-    except (OSError, NotImplementedError) as exc:
-        if os.name == "nt":
-            pytest.skip(f"directory symlink fixture unavailable on Windows: {exc}")
-        raise
+    link = _directory_symlink_to_ce(tmp_path, ce_root)
     review, intake, bundle = _outside_inputs(tmp_path)
     monkeypatch.setattr(launcher_module, "create_attempt", _forbid_attempt)
 
@@ -123,7 +129,38 @@ def test_existing_directory_symlink_resolving_into_ce_is_rejected(
     assert result.classification == "CE_PATH_BOUNDARY_INVALID"
     assert "output_folder" in result.reason
     assert result.attempt_path is None
+    assert result.output_path is None
     assert not (ce_root / "nested-output").exists()
+
+
+def test_existing_directory_symlink_input_resolving_into_ce_is_rejected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ce_root = tmp_path / "ce"
+    ce_root.mkdir()
+    protected_input = ce_root / "review-draft.json"
+    protected_input.write_text("{}\n", encoding="utf-8")
+    link = _directory_symlink_to_ce(tmp_path, ce_root)
+    _, intake, bundle = _outside_inputs(tmp_path)
+    output_folder = tmp_path / "safe-output"
+    before = _tree(ce_root)
+    monkeypatch.setattr(launcher_module, "create_attempt", _forbid_attempt)
+
+    result = run_export(
+        repository_path=ce_root,
+        review_draft_path=link / protected_input.name,
+        source_intake_path=intake,
+        source_bundle_path=bundle,
+        output_folder=output_folder,
+    )
+
+    assert result.classification == "CE_PATH_BOUNDARY_INVALID"
+    assert "review_draft_path" in result.reason
+    assert result.attempt_path is None
+    assert result.output_path is None
+    assert _tree(ce_root) == before
+    assert not output_folder.exists()
 
 
 class _Value:
