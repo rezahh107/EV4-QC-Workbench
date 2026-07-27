@@ -10,7 +10,6 @@ base_branch: main
 pull_request: 1
 pull_request_state: open_draft
 reference_workbench_head: 30843d4beb3bebc557678e5778be7240ef8a5b4b
-final_workbench_head: 4dfb7003ad3b1ca135c9954734ab98f2ad9322ca
 production_profiles:
   - ce
 ce_dependency:
@@ -38,7 +37,7 @@ implementation_state:
   copy_out_publication: false
 validation_state:
   exact_pair_workflow: validate
-  final_exact_head_run:
+  latest_recorded_exact_head_evidence:
     run_id: 30309558857
     tested_workbench_head: 4dfb7003ad3b1ca135c9954734ab98f2ad9322ca
     CE_head: ff40b2a9d801f34aad03829d0c1c24d85b5d7f08
