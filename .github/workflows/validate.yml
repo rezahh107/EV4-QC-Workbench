@@ -212,7 +212,15 @@ jobs:
           if ($current -ne $before) { throw "CE state changed during connection operations" }
 
       - name: Run official CE authorized, blocked, invalid, and prewrite integration
-        run: pytest -q -m integration tests/test_ce_export_integration.py
+        run: pytest -q -m integration tests/test_ce_export_integration.py --junitxml="$env:RUNNER_TEMP/windows-export-junit.xml"
+
+      - name: Upload Windows export diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-export-diagnostics
+          path: ${{ runner.temp }}/windows-export-junit.xml
+          retention-days: 1
 
       - name: Verify CE unchanged after export operations
         shell: pwsh
