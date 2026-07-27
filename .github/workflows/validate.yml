@@ -11,6 +11,8 @@ permissions:
 env:
   CE_REQUIRED_BRANCH: fix/ce-external-output-boundary
   CE_REQUIRED_SHA: ff40b2a9d801f34aad03829d0c1c24d85b5d7f08
+  CE_PRODUCER_SCHEMA_SHA256: c556bb9deeccdcafeb885a1c8b3dbd660e4e06f452b8ac3c7040d21377465fcc
+  CE_STAGE_BUNDLE_SHA256: fc1ec6d3f7aecbabaeb0a3455d9eb42788779d2fa1531e8c7b2cb3bde706a886
   PYTHONDONTWRITEBYTECODE: "1"
 
 jobs:
@@ -33,6 +35,12 @@ jobs:
           test "$(git rev-parse HEAD)" = "$WORKBENCH_HEAD_SHA"
           test -z "$(git status --porcelain)"
 
+      - name: Configure LF-preserving dependency checkout
+        shell: bash
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+
       - name: Checkout named repaired CE branch
         uses: actions/checkout@v4
         with:
@@ -42,7 +50,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Assert exact named clean CE dependency
+      - name: Assert exact named clean CE dependency and immutable bytes
         shell: bash
         run: |
           set -euo pipefail
@@ -51,6 +59,8 @@ jobs:
           test "$(git -C "$ce" rev-parse HEAD)" = "$CE_REQUIRED_SHA"
           test "$(git -C "$ce" branch --show-current)" = "$CE_REQUIRED_BRANCH"
           test "$(git -C "$ce" remote get-url origin)" = "https://github.com/rezahh107/EV4-Constructability-Engineer-Repo"
+          test "$(sha256sum "$ce/contracts/project-gate/producer-gate-export.v1.schema.json" | cut -d' ' -f1)" = "$CE_PRODUCER_SCHEMA_SHA256"
+          test "$(sha256sum "$ce/contracts/project-gate/stage-bundle.v1.schema.json" | cut -d' ' -f1)" = "$CE_STAGE_BUNDLE_SHA256"
           git -C "$ce" diff --quiet HEAD --
           git -C "$ce" diff --cached --quiet
           echo "EV4_CE_REPO=$ce" >> "$GITHUB_ENV"
@@ -143,6 +153,12 @@ jobs:
           if ((git rev-parse HEAD) -ne $env:WORKBENCH_HEAD_SHA) { throw "Workbench exact-head mismatch" }
           if ((git status --porcelain) -ne $null) { throw "Workbench checkout is not clean" }
 
+      - name: Configure LF-preserving dependency checkout
+        shell: pwsh
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+
       - name: Checkout named repaired CE branch
         uses: actions/checkout@v4
         with:
@@ -152,7 +168,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Assert exact named clean CE dependency
+      - name: Assert exact named clean CE dependency and immutable bytes
         shell: pwsh
         run: |
           $ce = Join-Path $env:GITHUB_WORKSPACE "EV4-Constructability-Engineer-Repo"
@@ -160,6 +176,10 @@ jobs:
           if ((git -C $ce rev-parse HEAD) -ne $env:CE_REQUIRED_SHA) { throw "CE evidence lock invalidated" }
           if ((git -C $ce branch --show-current) -ne $env:CE_REQUIRED_BRANCH) { throw "CE named branch mismatch" }
           if ((git -C $ce remote get-url origin) -ne "https://github.com/rezahh107/EV4-Constructability-Engineer-Repo") { throw "CE remote mismatch" }
+          $producer = (Get-FileHash -Algorithm SHA256 (Join-Path $ce "contracts/project-gate/producer-gate-export.v1.schema.json")).Hash.ToLowerInvariant()
+          $bundle = (Get-FileHash -Algorithm SHA256 (Join-Path $ce "contracts/project-gate/stage-bundle.v1.schema.json")).Hash.ToLowerInvariant()
+          if ($producer -ne $env:CE_PRODUCER_SCHEMA_SHA256) { throw "CE Producer Gate contract bytes mismatch" }
+          if ($bundle -ne $env:CE_STAGE_BUNDLE_SHA256) { throw "CE Stage Bundle contract bytes mismatch" }
           git -C $ce diff --quiet HEAD --
           if ($LASTEXITCODE -ne 0) { throw "CE tracked working tree is dirty" }
           git -C $ce diff --cached --quiet
@@ -212,15 +232,7 @@ jobs:
           if ($current -ne $before) { throw "CE state changed during connection operations" }
 
       - name: Run official CE authorized, blocked, invalid, and prewrite integration
-        run: pytest -q -m integration tests/test_ce_export_integration.py --junitxml="$env:RUNNER_TEMP/windows-export-junit.xml"
-
-      - name: Upload Windows export diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-export-diagnostics
-          path: ${{ runner.temp }}/windows-export-junit.xml
-          retention-days: 1
+        run: pytest -q -m integration tests/test_ce_export_integration.py
 
       - name: Verify CE unchanged after export operations
         shell: pwsh
