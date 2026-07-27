@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -105,7 +106,9 @@ def test_existing_directory_symlink_resolving_into_ce_is_rejected(
     try:
         link.symlink_to(ce_root, target_is_directory=True)
     except (OSError, NotImplementedError) as exc:
-        pytest.skip(f"directory symlink fixture unavailable: {exc}")
+        if os.name == "nt":
+            pytest.skip(f"directory symlink fixture unavailable on Windows: {exc}")
+        raise
     review, intake, bundle = _outside_inputs(tmp_path)
     monkeypatch.setattr(launcher_module, "create_attempt", _forbid_attempt)
 
