@@ -10,6 +10,7 @@ base_branch: main
 pull_request: 1
 pull_request_state: open_draft
 reference_workbench_head: 30843d4beb3bebc557678e5778be7240ef8a5b4b
+final_workbench_head: 4dfb7003ad3b1ca135c9954734ab98f2ad9322ca
 production_profiles:
   - ce
 ce_dependency:
@@ -37,16 +38,16 @@ implementation_state:
   copy_out_publication: false
 validation_state:
   exact_pair_workflow: validate
-  observed_successful_run:
-    run_id: 30309402081
-    tested_workbench_head: 84214491eba91d647e2c17ac60f9c7c96716f235
+  final_exact_head_run:
+    run_id: 30309558857
+    tested_workbench_head: 4dfb7003ad3b1ca135c9954734ab98f2ad9322ca
     CE_head: ff40b2a9d801f34aad03829d0c1c24d85b5d7f08
     CE_branch: fix/ce-external-output-boundary
     platform_independent_job:
-      job_id: 90121268213
+      job_id: 90121755018
       conclusion: success
     windows_exact_head_job:
-      job_id: 90121268285
+      job_id: 90121755044
       conclusion: success
   authorized_external_export: observed_success
   valid_blocked_external_export: observed_success
