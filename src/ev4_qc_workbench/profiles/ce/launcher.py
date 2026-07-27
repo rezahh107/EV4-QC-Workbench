@@ -21,6 +21,60 @@ def _text(value: Any, field: str, *, optional: bool = False) -> str | None:
     return value
 
 
+def _resolved_without_creation(path: Path) -> Path:
+    return Path(path).expanduser().resolve(strict=False)
+
+
+def _equals_or_descends_from(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        # Different Windows drives and unrelated roots are not containment.
+        return False
+
+
+def _containment_violation(
+    *,
+    repository_path: Path,
+    review_draft_path: Path,
+    source_intake_path: Path,
+    source_bundle_path: Path,
+    output_folder: Path,
+) -> tuple[str, Path, Path] | None:
+    root = _resolved_without_creation(repository_path)
+    candidates = (
+        ("review_draft_path", review_draft_path),
+        ("source_intake_path", source_intake_path),
+        ("source_bundle_path", source_bundle_path),
+        ("output_folder", output_folder),
+    )
+    for field, candidate in candidates:
+        resolved = _resolved_without_creation(candidate)
+        if _equals_or_descends_from(resolved, root):
+            return field, resolved, root
+    return None
+
+
+def _boundary_rejection(reason: str) -> CEExportResult:
+    return CEExportResult(
+        success=False,
+        classification="CE_PATH_BOUNDARY_INVALID",
+        reason=reason,
+        next_action="Select original inputs and an output folder outside the selected CE checkout.",
+        attempt_path=None,
+        output_path=None,
+        child_pid=None,
+        cli_exit_code=None,
+        handoff_allowed=False,
+        authorization_valid=False,
+        output_valid=False,
+        observed_commit=None,
+        exporter_id=None,
+        official_result=None,
+    )
+
+
 def verify_connection(repository_path: Path) -> CEConnectionResult:
     path = Path(repository_path).expanduser().resolve()
     try:
@@ -75,6 +129,22 @@ def run_export(
     source_bundle_path: Path,
     output_folder: Path,
 ) -> CEExportResult:
+    try:
+        violation = _containment_violation(
+            repository_path=repository_path,
+            review_draft_path=review_draft_path,
+            source_intake_path=source_intake_path,
+            source_bundle_path=source_bundle_path,
+            output_folder=output_folder,
+        )
+    except (OSError, RuntimeError) as exc:
+        return _boundary_rejection(f"Unable to resolve the CE path boundary safely: {type(exc).__name__}")
+    if violation is not None:
+        field, resolved, root = violation
+        return _boundary_rejection(
+            f"{field} resolves inside the selected CE repository: {resolved} (CE root: {root})"
+        )
+
     attempt = create_attempt(output_folder, profile_id=PROFILE_ID)
     snapshot = attempt / "input-snapshot"
     review = snapshot / "review-draft.json"
@@ -121,20 +191,20 @@ def run_export(
         )
         write_summary(attempt, code=classification, reason=reason, next_action=next_action)
         return CEExportResult(
-            success,
-            classification,
-            reason,
-            next_action,
-            attempt,
-            output if output.is_file() else None,
-            outcome.child_pid,
-            value["cli_exit_code"],
-            bool(report["handoff_allowed"]),
-            bool(report["authorization_valid"]),
-            bool(report["output_valid"]),
-            _text(value["observed_commit"], "observed_commit"),
-            _text(value["exporter_id"], "exporter_id"),
-            report,
+            success=success,
+            classification=classification,
+            reason=reason,
+            next_action=next_action,
+            attempt_path=attempt,
+            output_path=output if output.is_file() else None,
+            child_pid=outcome.child_pid,
+            cli_exit_code=value["cli_exit_code"],
+            handoff_allowed=bool(report["handoff_allowed"]),
+            authorization_valid=bool(report["authorization_valid"]),
+            output_valid=bool(report["output_valid"]),
+            observed_commit=_text(value["observed_commit"], "observed_commit"),
+            exporter_id=_text(value["exporter_id"], "exporter_id"),
+            official_result=report,
         )
     except (ProcessLaunchError, ValueError, OSError) as exc:
         classification = "CE_EXECUTION_PROTOCOL_FAILED"
@@ -146,6 +216,18 @@ def run_export(
         )
         write_summary(attempt, code=classification, reason=reason, next_action=next_action)
         return CEExportResult(
-            False, classification, reason, next_action, attempt, None,
-            getattr(exc, "child_pid", None), None, False, False, False, None, None, None,
+            success=False,
+            classification=classification,
+            reason=reason,
+            next_action=next_action,
+            attempt_path=attempt,
+            output_path=None,
+            child_pid=getattr(exc, "child_pid", None),
+            cli_exit_code=None,
+            handoff_allowed=False,
+            authorization_valid=False,
+            output_valid=False,
+            observed_commit=None,
+            exporter_id=None,
+            official_result=None,
         )
