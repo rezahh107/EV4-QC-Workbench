@@ -1,7 +1,7 @@
 # STATUS — EV4 QC Workbench
 
 Version: 0.1.1  
-Status: ce_profile_final_repair_implemented_exact_pair_ci_observed_review_pending  
+Status: ce_profile_final_repair_exact_pair_ci_confirmed_review_pending  
 Date: 2026-07-28
 
 ```yaml
@@ -36,17 +36,28 @@ implementation_state:
   CE_local_temporary_output: false
   copy_out_publication: false
 validation_state:
-  platform_independent_exact_pair_ci: observed_success_before_documentation_sync
-  windows_exact_pair_ci: observed_success_before_documentation_sync
+  exact_pair_workflow: validate
+  observed_successful_run:
+    run_id: 30309402081
+    tested_workbench_head: 84214491eba91d647e2c17ac60f9c7c96716f235
+    CE_head: ff40b2a9d801f34aad03829d0c1c24d85b5d7f08
+    CE_branch: fix/ce-external-output-boundary
+    platform_independent_job:
+      job_id: 90121268213
+      conclusion: success
+    windows_exact_head_job:
+      job_id: 90121268285
+      conclusion: success
   authorized_external_export: observed_success
   valid_blocked_external_export: observed_success
   invalid_external_export_without_artifact: observed_success
   CE_read_only_before_after_equality: observed_success
   immutable_contract_LF_checkout_and_hash_assertions: observed_success
-  final_documentation_head_ci: pending
+  complete_workbench_regression: observed_success
 conditional_validation:
   directory_symlink_to_CE:
-    linux_fixture: required
+    linux_fixture: executed_required_test
+    linux_result: passed
     windows_fixture: conditional_on_environment
 fresh_independent_review: required
 owner_merge_decision: required_after_valid_review
@@ -71,7 +82,7 @@ Each operation uses one new interpreter through:
 sys.executable -m ev4_qc_workbench.profiles.ce.process_child
 ```
 
-The child verifies the repository remote, exact commit, tracked cleanliness, public and implementation file origins, official option surface, exporter ID, and exporter version before importing governed CE Runtime modules. Parent `sys.modules` poisoning is tested and cannot cross the subprocess-exec boundary.
+The child verifies the repository remote, exact commit, tracked cleanliness, public and implementation file origins, official option surface, exporter ID, and exporter version before importing governed CE Runtime modules. Parent `sys.modules` poisoning is tested and cannot cross the subprocess-exec boundary. Distinct child PIDs are supporting evidence, not the sole proof of isolation.
 
 ## Windows immutable-byte requirement
 
@@ -79,6 +90,6 @@ The exact-pair workflow disables line-ending conversion before checking out CE. 
 
 ## Remaining gates
 
-The final documentation Head must pass both platform-independent and Windows exact-head jobs. After that, a fresh independent PR Inspector review and a separate owner merge decision remain required. Passing CI alone does not close findings or authorize Merge.
+A fresh independent PR Inspector review and a separate owner merge decision remain required. Passing CI does not close findings, make the PR production-ready, or authorize Merge.
 
 No Architect, Builder, Responsive, Project Gate, Decision Kernel, or PR Inspector Profile is present. Stage-QC settings are not read or migrated.
