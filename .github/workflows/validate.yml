@@ -8,12 +8,16 @@ on:
 permissions:
   contents: read
 
+env:
+  CE_REQUIRED_BRANCH: fix/ce-external-output-boundary
+  CE_REQUIRED_SHA: ff40b2a9d801f34aad03829d0c1c24d85b5d7f08
+  PYTHONDONTWRITEBYTECODE: "1"
+
 jobs:
-  windows-exact-head:
-    runs-on: windows-latest
+  platform-independent:
+    runs-on: ubuntu-latest
     env:
       WORKBENCH_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-      CE_REQUIRED_SHA: 0e7d8756c8452113d42e8f50fc9489b240a01bfe
     steps:
       - name: Checkout exact Workbench head
         uses: actions/checkout@v4
@@ -23,30 +27,43 @@ jobs:
           persist-credentials: false
 
       - name: Assert exact Workbench head
-        shell: pwsh
+        shell: bash
         run: |
-          if ((git rev-parse HEAD) -ne $env:WORKBENCH_HEAD_SHA) { throw "Workbench exact-head mismatch" }
-          if ((git status --porcelain) -ne $null) { throw "Workbench checkout is not clean" }
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$WORKBENCH_HEAD_SHA"
+          test -z "$(git status --porcelain)"
 
-      - name: Checkout locked CE main
+      - name: Checkout named repaired CE branch
         uses: actions/checkout@v4
         with:
           repository: rezahh107/EV4-Constructability-Engineer-Repo
-          ref: main
+          ref: ${{ env.CE_REQUIRED_BRANCH }}
           path: EV4-Constructability-Engineer-Repo
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Assert exact clean CE dependency
-        shell: pwsh
+      - name: Assert exact named clean CE dependency
+        shell: bash
         run: |
-          $ce = Join-Path $env:GITHUB_WORKSPACE "EV4-Constructability-Engineer-Repo"
-          if ((git -C $ce rev-parse HEAD) -ne $env:CE_REQUIRED_SHA) { throw "CE evidence lock invalidated" }
-          git -C $ce diff --quiet HEAD --
-          if ($LASTEXITCODE -ne 0) { throw "CE tracked working tree is dirty" }
-          git -C $ce diff --cached --quiet
-          if ($LASTEXITCODE -ne 0) { throw "CE index is dirty" }
-          "EV4_CE_REPO=$ce" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          set -euo pipefail
+          ce="$GITHUB_WORKSPACE/EV4-Constructability-Engineer-Repo"
+          git -C "$ce" switch -C "$CE_REQUIRED_BRANCH" "$CE_REQUIRED_SHA"
+          test "$(git -C "$ce" rev-parse HEAD)" = "$CE_REQUIRED_SHA"
+          test "$(git -C "$ce" branch --show-current)" = "$CE_REQUIRED_BRANCH"
+          test "$(git -C "$ce" remote get-url origin)" = "https://github.com/rezahh107/EV4-Constructability-Engineer-Repo"
+          git -C "$ce" diff --quiet HEAD --
+          git -C "$ce" diff --cached --quiet
+          echo "EV4_CE_REPO=$ce" >> "$GITHUB_ENV"
+
+      - name: Capture CE read-only baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          ce="$GITHUB_WORKSPACE/EV4-Constructability-Engineer-Repo"
+          git -C "$ce" rev-parse HEAD > "$RUNNER_TEMP/ce-head.before"
+          git -C "$ce" branch --show-current > "$RUNNER_TEMP/ce-branch.before"
+          git -C "$ce" status --porcelain=v1 --untracked-files=all > "$RUNNER_TEMP/ce-status.before"
+          git -C "$ce" ls-files -s > "$RUNNER_TEMP/ce-index.before"
 
       - uses: actions/setup-python@v5
         with:
@@ -62,14 +79,153 @@ jobs:
       - name: Compile production and tests
         run: python -m compileall -q src tests
 
-      - name: Run Profile lock, registry, transport, snapshot, and import-boundary tests
-        run: pytest -q tests/test_profile_registry.py tests/test_ce_profile_lock.py tests/test_strict_json.py tests/test_process_transport.py tests/test_attempts.py tests/test_parent_import_boundary.py
+      - name: Run platform-independent boundary, lock, transport, and import tests
+        run: |
+          pytest -q \
+            tests/test_ce_preflight.py \
+            tests/test_ce_profile_lock.py \
+            tests/test_process_transport.py \
+            tests/test_parent_import_boundary.py \
+            tests/test_attempts.py \
+            tests/test_strict_json.py \
+            tests/test_profile_registry.py
 
-      - name: Run exact CE connection and tracked-state integration
+      - name: Prove fresh child and exact CE origins on Linux
         run: pytest -q -m integration tests/test_ce_connection_integration.py
 
-      - name: Run official CE authorized, blocked, and invalid integration
+      - name: Verify CE unchanged after Linux connection operations
+        shell: bash
+        run: |
+          set -euo pipefail
+          ce="$EV4_CE_REPO"
+          git -C "$ce" rev-parse HEAD > "$RUNNER_TEMP/ce-head.after-connection"
+          git -C "$ce" branch --show-current > "$RUNNER_TEMP/ce-branch.after-connection"
+          git -C "$ce" status --porcelain=v1 --untracked-files=all > "$RUNNER_TEMP/ce-status.after-connection"
+          git -C "$ce" ls-files -s > "$RUNNER_TEMP/ce-index.after-connection"
+          cmp "$RUNNER_TEMP/ce-head.before" "$RUNNER_TEMP/ce-head.after-connection"
+          cmp "$RUNNER_TEMP/ce-branch.before" "$RUNNER_TEMP/ce-branch.after-connection"
+          cmp "$RUNNER_TEMP/ce-status.before" "$RUNNER_TEMP/ce-status.after-connection"
+          cmp "$RUNNER_TEMP/ce-index.before" "$RUNNER_TEMP/ce-index.after-connection"
+
+      - name: Run platform-independent Workbench regression suite
+        run: pytest -q
+
+      - name: Verify final Linux CE state and patch whitespace
+        shell: bash
+        run: |
+          set -euo pipefail
+          ce="$EV4_CE_REPO"
+          git -C "$ce" rev-parse HEAD > "$RUNNER_TEMP/ce-head.final"
+          git -C "$ce" branch --show-current > "$RUNNER_TEMP/ce-branch.final"
+          git -C "$ce" status --porcelain=v1 --untracked-files=all > "$RUNNER_TEMP/ce-status.final"
+          git -C "$ce" ls-files -s > "$RUNNER_TEMP/ce-index.final"
+          cmp "$RUNNER_TEMP/ce-head.before" "$RUNNER_TEMP/ce-head.final"
+          cmp "$RUNNER_TEMP/ce-branch.before" "$RUNNER_TEMP/ce-branch.final"
+          cmp "$RUNNER_TEMP/ce-status.before" "$RUNNER_TEMP/ce-status.final"
+          cmp "$RUNNER_TEMP/ce-index.before" "$RUNNER_TEMP/ce-index.final"
+          git diff --check
+
+  windows-exact-head:
+    runs-on: windows-latest
+    env:
+      WORKBENCH_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - name: Checkout exact Workbench head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.WORKBENCH_HEAD_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Assert exact Workbench head
+        shell: pwsh
+        run: |
+          if ((git rev-parse HEAD) -ne $env:WORKBENCH_HEAD_SHA) { throw "Workbench exact-head mismatch" }
+          if ((git status --porcelain) -ne $null) { throw "Workbench checkout is not clean" }
+
+      - name: Checkout named repaired CE branch
+        uses: actions/checkout@v4
+        with:
+          repository: rezahh107/EV4-Constructability-Engineer-Repo
+          ref: ${{ env.CE_REQUIRED_BRANCH }}
+          path: EV4-Constructability-Engineer-Repo
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Assert exact named clean CE dependency
+        shell: pwsh
+        run: |
+          $ce = Join-Path $env:GITHUB_WORKSPACE "EV4-Constructability-Engineer-Repo"
+          git -C $ce switch -C $env:CE_REQUIRED_BRANCH $env:CE_REQUIRED_SHA
+          if ((git -C $ce rev-parse HEAD) -ne $env:CE_REQUIRED_SHA) { throw "CE evidence lock invalidated" }
+          if ((git -C $ce branch --show-current) -ne $env:CE_REQUIRED_BRANCH) { throw "CE named branch mismatch" }
+          if ((git -C $ce remote get-url origin) -ne "https://github.com/rezahh107/EV4-Constructability-Engineer-Repo") { throw "CE remote mismatch" }
+          git -C $ce diff --quiet HEAD --
+          if ($LASTEXITCODE -ne 0) { throw "CE tracked working tree is dirty" }
+          git -C $ce diff --cached --quiet
+          if ($LASTEXITCODE -ne 0) { throw "CE index is dirty" }
+          "EV4_CE_REPO=$ce" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Capture CE read-only baseline
+        shell: pwsh
+        run: |
+          $ce = $env:EV4_CE_REPO
+          [ordered]@{
+            head = (git -C $ce rev-parse HEAD)
+            branch = (git -C $ce branch --show-current)
+            status = @(git -C $ce status --porcelain=v1 --untracked-files=all)
+            index = @(git -C $ce ls-files -s)
+          } | ConvertTo-Json -Compress | Set-Content -NoNewline (Join-Path $env:RUNNER_TEMP "ce-before.json")
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install locked Workbench environment
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.lock
+          python -m pip install -e . --no-deps
+
+      - name: Compile production and tests
+        run: python -m compileall -q src tests
+
+      - name: Run Profile lock, preflight, registry, transport, snapshot, and import-boundary tests
+        run: |
+          pytest -q tests/test_ce_preflight.py tests/test_profile_registry.py tests/test_ce_profile_lock.py tests/test_strict_json.py tests/test_process_transport.py tests/test_attempts.py tests/test_parent_import_boundary.py
+
+      - name: Run exact CE connection and fresh-interpreter integration
+        run: pytest -q -m integration tests/test_ce_connection_integration.py
+
+      - name: Verify CE unchanged after connection operations
+        shell: pwsh
+        run: |
+          $ce = $env:EV4_CE_REPO
+          $current = [ordered]@{
+            head = (git -C $ce rev-parse HEAD)
+            branch = (git -C $ce branch --show-current)
+            status = @(git -C $ce status --porcelain=v1 --untracked-files=all)
+            index = @(git -C $ce ls-files -s)
+          } | ConvertTo-Json -Compress
+          $before = Get-Content -Raw (Join-Path $env:RUNNER_TEMP "ce-before.json")
+          if ($current -ne $before) { throw "CE state changed during connection operations" }
+
+      - name: Run official CE authorized, blocked, invalid, and prewrite integration
         run: pytest -q -m integration tests/test_ce_export_integration.py
+
+      - name: Verify CE unchanged after export operations
+        shell: pwsh
+        run: |
+          $ce = $env:EV4_CE_REPO
+          $current = [ordered]@{
+            head = (git -C $ce rev-parse HEAD)
+            branch = (git -C $ce branch --show-current)
+            status = @(git -C $ce status --porcelain=v1 --untracked-files=all)
+            index = @(git -C $ce ls-files -s)
+          } | ConvertTo-Json -Compress
+          $before = Get-Content -Raw (Join-Path $env:RUNNER_TEMP "ce-before.json")
+          if ($current -ne $before) { throw "CE state changed during export operations" }
 
       - name: Run GUI workflow test
         run: pytest -q tests/test_gui_workflow.py
@@ -77,15 +233,18 @@ jobs:
       - name: Run full Workbench suite
         run: pytest -q
 
-      - name: Verify CE dependency remains unchanged
+      - name: Verify final CE state
         shell: pwsh
         run: |
           $ce = $env:EV4_CE_REPO
-          if ((git -C $ce rev-parse HEAD) -ne $env:CE_REQUIRED_SHA) { throw "CE Head changed" }
-          git -C $ce diff --quiet HEAD --
-          if ($LASTEXITCODE -ne 0) { throw "CE tracked working tree changed" }
-          git -C $ce diff --cached --quiet
-          if ($LASTEXITCODE -ne 0) { throw "CE index changed" }
+          $current = [ordered]@{
+            head = (git -C $ce rev-parse HEAD)
+            branch = (git -C $ce branch --show-current)
+            status = @(git -C $ce status --porcelain=v1 --untracked-files=all)
+            index = @(git -C $ce ls-files -s)
+          } | ConvertTo-Json -Compress
+          $before = Get-Content -Raw (Join-Path $env:RUNNER_TEMP "ce-before.json")
+          if ($current -ne $before) { throw "CE dependency changed" }
 
       - name: Check patch whitespace
         run: git diff --check
