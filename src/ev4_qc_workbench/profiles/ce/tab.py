@@ -142,7 +142,7 @@ class CETab(ttk.Frame):
             return
         self.last_attempt = result.attempt_path
         self.open_button.configure(state="normal" if self.last_attempt else "disabled")
-        if self.output.get():
+        if result.attempt_path is not None and self.output.get():
             update_profile_settings(self.profile_id, output_folder=str(Path(self.output.get()).expanduser().resolve()))
         self.status.set(result.classification)
         self.detail.set(
