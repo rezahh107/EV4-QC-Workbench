@@ -1,0 +1,4 @@
+# Direct environment lock used by CI and setup_windows.bat.
+jsonschema==4.26.0
+PyYAML==6.0.2
+pytest==9.1.1
