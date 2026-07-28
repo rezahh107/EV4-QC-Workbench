@@ -5,9 +5,11 @@ import pytest
 from ev4_qc_workbench.strict_json import load_file
 import ev4_qc_workbench.profiles.ce as ce
 
-REQUIRED_CE_COMMIT = "ff40b2a9d801f34aad03829d0c1c24d85b5d7f08"
+REQUIRED_CE_COMMIT = "bc4a901d82fcdbdb131e30058b399508262706c5"
 REQUIRED_EXPORTER_ID = "ev4-producer-gate-export-validator"
 REQUIRED_EXPORTER_VERSION = "1.1.0"
+OBSOLETE_CE_COMMIT = "ff40b2a9d801f34aad03829d0c1c24d85b5d7f08"
+OBSOLETE_CE_BRANCH = "fix/ce-external-output-boundary"
 
 
 def _lock() -> dict:
@@ -26,6 +28,21 @@ def test_ce_profile_lock_is_exact():
     assert lock["official_cli_options"] == [
         "--review-draft", "--source-intake", "--source-bundle", "--output", "--repo-root", "--overwrite"
     ]
+
+
+def test_current_ce_identity_surfaces_do_not_retain_obsolete_feature_authority():
+    root = Path(ce.__file__).resolve().parents[4]
+    current_surfaces = [
+        root / "src/ev4_qc_workbench/profiles/ce/ce-profile.lock.json",
+        root / "tests/ce_integration_support.py",
+        root / ".github/workflows/validate.yml",
+        root / "README.md",
+        root / "STATUS.md",
+    ]
+    for path in current_surfaces:
+        text = path.read_text(encoding="utf-8")
+        assert OBSOLETE_CE_COMMIT not in text, path
+        assert OBSOLETE_CE_BRANCH not in text, path
 
 
 @pytest.mark.parametrize(
