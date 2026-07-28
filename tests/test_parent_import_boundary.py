@@ -29,7 +29,7 @@ def test_importing_parent_keeps_ce_modules_absent():
     assert not any(name == "validator" or name.startswith("validator.") for name in sys.modules)
 
 
-def test_child_source_orders_exact_checkout_verification_before_runtime_import():
+def test_child_source_orders_checkout_and_contamination_gates_before_runtime_import():
     source = Path(process_child.__file__).read_text(encoding="utf-8")
     tree = ast.parse(source)
     function = next(
@@ -46,21 +46,48 @@ def test_child_source_orders_exact_checkout_verification_before_runtime_import()
         and node.func.value.id == "importlib"
         and node.func.attr == "import_module"
     ]
-    commit_checks = [
+    checkout_guards = [
         node.lineno
         for node in ast.walk(function)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
-        and node.func.id == "_git"
-        and any(isinstance(arg, ast.Constant) and arg.value == "HEAD" for arg in node.args)
+        and node.func.id == "_verify_checkout_identity"
     ]
     pre_import_guards = [
         node.lineno
         for node in ast.walk(function)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
-        and node.func.id == "_no_ce_modules_loaded"
+        and node.func.id in {"_no_ce_modules_loaded", "_no_repo_modules_loaded", "_require_isolated_interpreter"}
     ]
-    assert imports and commit_checks and pre_import_guards
-    assert max(commit_checks) < min(imports)
-    assert max(pre_import_guards) < min(imports)
+    assert imports and checkout_guards and pre_import_guards
+    assert min(checkout_guards) < min(imports)
+    assert max(line for line in pre_import_guards if line < min(imports)) < min(imports)
+
+
+def test_export_rechecks_execution_authority_immediately_before_public_main():
+    source = Path(process_child.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    function = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_run_export"
+    )
+    rechecks = [
+        node.lineno
+        for node in ast.walk(function)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "_recheck_before_execution"
+    ]
+    public_main_calls = [
+        node.lineno
+        for node in ast.walk(function)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "public"
+        and node.func.attr == "main"
+    ]
+    assert rechecks and public_main_calls
+    assert max(rechecks) < min(public_main_calls)
