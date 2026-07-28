@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import importlib
+import importlib.machinery
 import io
 import os
 import subprocess
@@ -84,16 +85,82 @@ def _lock() -> dict[str, Any]:
     return value
 
 
+def _require_isolated_interpreter(root: Path | None = None) -> None:
+    if sys.flags.isolated != 1:
+        raise CEChildError("CE_IMPORT_BOUNDARY_INVALID", "CE Profile child is not running in Python isolated mode")
+    prefix = sys.pycache_prefix
+    if not isinstance(prefix, str) or not prefix:
+        raise CEChildError("CE_IMPORT_BOUNDARY_INVALID", "CE Profile child has no private bytecode-cache prefix")
+    if root is not None and _inside(Path(prefix), root):
+        raise CEChildError("CE_IMPORT_BOUNDARY_INVALID", "CE bytecode cache must remain outside the selected CE checkout")
+
+
 def _no_ce_modules_loaded() -> None:
     loaded = sorted(name for name in sys.modules if name == "validator" or name.startswith("validator."))
     if loaded:
         raise CEChildError("CE_IMPORT_BOUNDARY_INVALID", f"CE modules loaded before checkout verification: {loaded[0]}")
 
 
-def _verify_and_import(root: Path) -> tuple[dict[str, Any], Any, Any, dict[str, Any]]:
-    lock = _lock()
-    _no_ce_modules_loaded()
-    root = Path(root).expanduser().resolve(strict=True)
+def _module_origin(module: Any) -> Path | None:
+    origin = getattr(module, "__file__", None)
+    if not isinstance(origin, str) or not origin:
+        spec = getattr(module, "__spec__", None)
+        origin = getattr(spec, "origin", None)
+    if not isinstance(origin, str) or not origin or origin in {"built-in", "frozen"}:
+        return None
+    try:
+        return Path(origin).expanduser().resolve(strict=False)
+    except OSError:
+        return None
+
+
+def _no_repo_modules_loaded(root: Path) -> None:
+    for name, module in sorted(sys.modules.items()):
+        origin = _module_origin(module)
+        if origin is not None and _inside(origin, root):
+            raise CEChildError(
+                "CE_IMPORT_BOUNDARY_INVALID",
+                f"Repository-local module loaded before CE checkout verification: {name}",
+            )
+
+
+def _untracked_or_ignored_paths(root: Path) -> list[str]:
+    values: set[str] = set()
+    commands = (
+        ("ls-files", "--others", "--exclude-standard", "-z"),
+        ("ls-files", "--others", "--ignored", "--exclude-standard", "-z"),
+    )
+    for command in commands:
+        output = _git(root, *command).stdout
+        values.update(item for item in output.split("\0") if item)
+    return sorted(values)
+
+
+def _import_capable_local_paths(root: Path) -> list[str]:
+    suffixes = tuple(sorted(importlib.machinery.all_suffixes(), key=len, reverse=True))
+    contaminated: list[str] = []
+    for relative in _untracked_or_ignored_paths(root):
+        path = root / relative
+        name = path.name
+        if name.endswith(suffixes):
+            contaminated.append(relative)
+            continue
+        if path.is_symlink() and name.isidentifier():
+            contaminated.append(relative)
+    return contaminated
+
+
+def _assert_import_contamination_absent(root: Path) -> None:
+    contaminated = _import_capable_local_paths(root)
+    if contaminated:
+        raise CEChildError(
+            "CE_CHECKOUT_IMPORT_CONTAMINATION",
+            f"Untracked or ignored repository-local import material is forbidden: {contaminated[0]}",
+        )
+
+
+def _verify_checkout_identity(root: Path, lock: dict[str, Any]) -> tuple[str, str]:
+    _require_isolated_interpreter(root)
     top = Path(_git(root, "rev-parse", "--show-toplevel").stdout.strip()).resolve()
     if top != root:
         raise CEChildError("CE_CHECKOUT_IDENTITY_INVALID", "Selected path is not the CE repository root")
@@ -107,11 +174,47 @@ def _verify_and_import(root: Path) -> tuple[dict[str, Any], Any, Any, dict[str, 
         raise CEChildError("CE_CHECKOUT_IDENTITY_INVALID", "CE tracked working tree differs from HEAD")
     if _git(root, "diff", "--cached", "--quiet", allowed=(0, 1)).returncode != 0:
         raise CEChildError("CE_CHECKOUT_IDENTITY_INVALID", "CE index contains staged tracked changes")
+    _assert_import_contamination_absent(root)
+    return remote, commit
+
+
+def _verify_loaded_repo_modules(root: Path) -> int:
+    checked = 0
+    for name, module in sorted(sys.modules.items()):
+        origin = _module_origin(module)
+        if origin is None or not _inside(origin, root):
+            continue
+        if origin.is_symlink() or not origin.is_file():
+            raise CEChildError("CE_MODULE_ORIGIN_MISMATCH", f"Repository-local module origin is not a regular file: {name}")
+        relative = origin.relative_to(root.resolve()).as_posix()
+        tracked = _git(root, "ls-files", "--error-unmatch", "--", relative, allowed=(0, 1))
+        if tracked.returncode != 0:
+            raise CEChildError("CE_MODULE_ORIGIN_MISMATCH", f"Repository-local execution origin is not tracked at HEAD: {relative}")
+        expected_blob = _git(root, "rev-parse", f"HEAD:{relative}").stdout.strip()
+        observed_blob = _git(root, "hash-object", "--no-filters", "--", str(origin)).stdout.strip()
+        if observed_blob != expected_blob:
+            raise CEChildError("CE_MODULE_ORIGIN_MISMATCH", f"Repository-local execution bytes differ from HEAD: {relative}")
+        checked += 1
+    return checked
+
+
+def _recheck_before_execution(root: Path, lock: dict[str, Any]) -> None:
+    _verify_checkout_identity(root, lock)
+    _verify_loaded_repo_modules(root)
+
+
+def _verify_and_import(root: Path) -> tuple[dict[str, Any], Any, Any, dict[str, Any]]:
+    lock = _lock()
+    _require_isolated_interpreter()
+    _no_ce_modules_loaded()
+    root = Path(root).expanduser().resolve(strict=True)
+    remote, commit = _verify_checkout_identity(root, lock)
+    _no_ce_modules_loaded()
+    _no_repo_modules_loaded(root)
     for relative in (PUBLIC_PATH, IMPLEMENTATION_PATH):
         path = root / relative
         if not path.is_file() or path.is_symlink():
             raise CEChildError("CE_PUBLIC_CLI_SURFACE_INVALID", f"Required public file is unavailable: {relative}")
-    _no_ce_modules_loaded()
     sys.path.insert(0, str(root))
     public = importlib.import_module(lock["public_module"])
     implementation = importlib.import_module("validator._verified_project_gate_exporter_impl")
@@ -121,12 +224,6 @@ def _verify_and_import(root: Path) -> tuple[dict[str, Any], Any, Any, dict[str, 
     observed_impl = Path(implementation.__file__).resolve(strict=True)
     if observed_public != expected_public or observed_impl != expected_impl:
         raise CEChildError("CE_MODULE_ORIGIN_MISMATCH", "CE public module origin mismatch")
-    for name, module in sorted(sys.modules.items()):
-        if name != "validator" and not name.startswith("validator."):
-            continue
-        origin = getattr(module, "__file__", None)
-        if origin and not _inside(Path(origin), root):
-            raise CEChildError("CE_MODULE_ORIGIN_MISMATCH", f"CE module escapes selected checkout: {name}")
     if tuple(getattr(public, "OFFICIAL_CLI_OPTIONS", ())) != tuple(lock["official_cli_options"]):
         raise CEChildError("CE_PUBLIC_CLI_SURFACE_INVALID", "Official CLI options differ from Profile Lock")
     if getattr(public, "VERIFIED_EXPORTER_ID", None) != lock["verified_exporter_id"]:
@@ -136,6 +233,8 @@ def _verify_and_import(root: Path) -> tuple[dict[str, Any], Any, Any, dict[str, 
     main = getattr(public, lock["public_entry_point"], None)
     if not callable(main):
         raise CEChildError("CE_PUBLIC_CLI_SURFACE_INVALID", "Official public main is not callable")
+    repo_local_module_count = _verify_loaded_repo_modules(root)
+    _verify_checkout_identity(root, lock)
     identity = {
         "repository_identity": remote,
         "observed_commit": commit,
@@ -146,6 +245,10 @@ def _verify_and_import(root: Path) -> tuple[dict[str, Any], Any, Any, dict[str, 
         "implementation_module_origin": str(observed_impl),
         "exporter_id": public.VERIFIED_EXPORTER_ID,
         "exporter_version": public.VERIFIED_EXPORTER_VERSION,
+        "official_cli_options": list(public.OFFICIAL_CLI_OPTIONS),
+        "isolated_mode": True,
+        "private_pycache_outside_ce": True,
+        "repo_local_module_count": repo_local_module_count,
     }
     return lock, public, implementation, identity
 
@@ -176,7 +279,7 @@ def _run_export(payload: dict[str, Any]) -> dict[str, Any]:
     for key in ("review_draft_path", "source_intake_path", "source_bundle_path", "output_path"):
         if _inside(Path(payload[key]), root):
             raise CEChildError("CE_OUTPUT_BOUNDARY_INVALID", "Workbench inputs and outputs must remain outside CE repository")
-    _, public, _, identity = _verify_and_import(root)
+    lock, public, _, identity = _verify_and_import(root)
     argv = [
         "--review-draft", payload["review_draft_path"],
         "--source-intake", payload["source_intake_path"],
@@ -184,6 +287,7 @@ def _run_export(payload: dict[str, Any]) -> dict[str, Any]:
         "--output", payload["output_path"],
         "--repo-root", str(root),
     ]
+    _recheck_before_execution(root, lock)
     buffer = io.StringIO()
     try:
         with contextlib.redirect_stdout(buffer):
@@ -257,6 +361,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     request_id = "unknown"
     operation = "unknown"
     try:
+        _require_isolated_interpreter()
         request = load_file(args.request, max_bytes=MAX_REQUEST_BYTES)
         request_id, operation, payload = _validate_request(request)
         profile_payload = _verify_connection(payload) if operation == "verify_connection" else _run_export(payload)
