@@ -89,8 +89,19 @@ def verify_connection(repository_path: Path) -> CEConnectionResult:
             "connection_ok", "code", "reason", "repository_identity", "observed_commit",
             "required_commit", "tracked_worktree_clean", "untracked_metadata_allowed",
             "public_module_origin", "implementation_module_origin", "exporter_id", "exporter_version",
+            "official_cli_options", "isolated_mode", "private_pycache_outside_ce",
+            "repo_local_module_count",
         }
-        if set(value) != required or value.get("connection_ok") is not True:
+        if (
+            set(value) != required
+            or value.get("connection_ok") is not True
+            or value.get("isolated_mode") is not True
+            or value.get("private_pycache_outside_ce") is not True
+            or not isinstance(value.get("repo_local_module_count"), int)
+            or isinstance(value.get("repo_local_module_count"), bool)
+            or value.get("repo_local_module_count", 0) <= 0
+            or not isinstance(value.get("official_cli_options"), list)
+        ):
             raise ValueError("Malformed CE connection result")
         return CEConnectionResult(
             True,
@@ -172,9 +183,19 @@ def run_export(
             "classification", "cli_exit_code", "official_result", "output_path",
             "repository_identity", "observed_commit", "required_commit", "tracked_worktree_clean",
             "untracked_metadata_allowed", "public_module_origin", "implementation_module_origin",
-            "exporter_id", "exporter_version",
+            "exporter_id", "exporter_version", "official_cli_options", "isolated_mode",
+            "private_pycache_outside_ce", "repo_local_module_count",
         }
-        if set(value) != required or not isinstance(value.get("official_result"), dict):
+        if (
+            set(value) != required
+            or not isinstance(value.get("official_result"), dict)
+            or value.get("isolated_mode") is not True
+            or value.get("private_pycache_outside_ce") is not True
+            or not isinstance(value.get("repo_local_module_count"), int)
+            or isinstance(value.get("repo_local_module_count"), bool)
+            or value.get("repo_local_module_count", 0) <= 0
+            or not isinstance(value.get("official_cli_options"), list)
+        ):
             raise ValueError("Malformed CE export result")
         classification = _text(value["classification"], "classification")
         report = value["official_result"]
