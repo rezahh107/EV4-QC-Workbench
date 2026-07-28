@@ -9,8 +9,8 @@ permissions:
   contents: read
 
 env:
-  CE_REQUIRED_BRANCH: fix/ce-external-output-boundary
-  CE_REQUIRED_SHA: ff40b2a9d801f34aad03829d0c1c24d85b5d7f08
+  CE_REFERENCE_BRANCH: main
+  CE_REQUIRED_SHA: bc4a901d82fcdbdb131e30058b399508262706c5
   CE_PRODUCER_SCHEMA_SHA256: c556bb9deeccdcafeb885a1c8b3dbd660e4e06f452b8ac3c7040d21377465fcc
   CE_STAGE_BUNDLE_SHA256: fc1ec6d3f7aecbabaeb0a3455d9eb42788779d2fa1531e8c7b2cb3bde706a886
   PYTHONDONTWRITEBYTECODE: "1"
@@ -41,23 +41,22 @@ jobs:
           git config --global core.autocrlf false
           git config --global core.eol lf
 
-      - name: Checkout named repaired CE branch
+      - name: Checkout current CE main reference
         uses: actions/checkout@v4
         with:
           repository: rezahh107/EV4-Constructability-Engineer-Repo
-          ref: ${{ env.CE_REQUIRED_BRANCH }}
+          ref: ${{ env.CE_REFERENCE_BRANCH }}
           path: EV4-Constructability-Engineer-Repo
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Assert exact named clean CE dependency and immutable bytes
+      - name: Assert selected current-main exact CE dependency and immutable bytes
         shell: bash
         run: |
           set -euo pipefail
           ce="$GITHUB_WORKSPACE/EV4-Constructability-Engineer-Repo"
-          git -C "$ce" switch -C "$CE_REQUIRED_BRANCH" "$CE_REQUIRED_SHA"
           test "$(git -C "$ce" rev-parse HEAD)" = "$CE_REQUIRED_SHA"
-          test "$(git -C "$ce" branch --show-current)" = "$CE_REQUIRED_BRANCH"
+          test "$(git -C "$ce" branch --show-current)" = "$CE_REFERENCE_BRANCH"
           test "$(git -C "$ce" remote get-url origin)" = "https://github.com/rezahh107/EV4-Constructability-Engineer-Repo"
           test "$(sha256sum "$ce/contracts/project-gate/producer-gate-export.v1.schema.json" | cut -d' ' -f1)" = "$CE_PRODUCER_SCHEMA_SHA256"
           test "$(sha256sum "$ce/contracts/project-gate/stage-bundle.v1.schema.json" | cut -d' ' -f1)" = "$CE_STAGE_BUNDLE_SHA256"
@@ -71,8 +70,7 @@ jobs:
           set -euo pipefail
           ce="$GITHUB_WORKSPACE/EV4-Constructability-Engineer-Repo"
           git -C "$ce" rev-parse HEAD > "$RUNNER_TEMP/ce-head.before"
-          git -C "$ce" branch --show-current > "$RUNNER_TEMP/ce-branch.before"
-          git -C "$ce" status --porcelain=v1 --untracked-files=all > "$RUNNER_TEMP/ce-status.before"
+          git -C "$ce" status --porcelain=v1 --untracked-files=all --ignored=matching > "$RUNNER_TEMP/ce-status.before"
           git -C "$ce" ls-files -s > "$RUNNER_TEMP/ce-index.before"
 
       - uses: actions/setup-python@v5
@@ -100,7 +98,7 @@ jobs:
             tests/test_strict_json.py \
             tests/test_profile_registry.py
 
-      - name: Prove fresh child and exact CE origins on Linux
+      - name: Prove fresh isolated child and exact CE origins on Linux
         run: pytest -q -m integration tests/test_ce_connection_integration.py
 
       - name: Verify CE unchanged after Linux connection operations
@@ -109,13 +107,26 @@ jobs:
           set -euo pipefail
           ce="$EV4_CE_REPO"
           git -C "$ce" rev-parse HEAD > "$RUNNER_TEMP/ce-head.after-connection"
-          git -C "$ce" branch --show-current > "$RUNNER_TEMP/ce-branch.after-connection"
-          git -C "$ce" status --porcelain=v1 --untracked-files=all > "$RUNNER_TEMP/ce-status.after-connection"
+          git -C "$ce" status --porcelain=v1 --untracked-files=all --ignored=matching > "$RUNNER_TEMP/ce-status.after-connection"
           git -C "$ce" ls-files -s > "$RUNNER_TEMP/ce-index.after-connection"
           cmp "$RUNNER_TEMP/ce-head.before" "$RUNNER_TEMP/ce-head.after-connection"
-          cmp "$RUNNER_TEMP/ce-branch.before" "$RUNNER_TEMP/ce-branch.after-connection"
           cmp "$RUNNER_TEMP/ce-status.before" "$RUNNER_TEMP/ce-status.after-connection"
           cmp "$RUNNER_TEMP/ce-index.before" "$RUNNER_TEMP/ce-index.after-connection"
+
+      - name: Run official CE authorized blocked invalid and prewrite integration on Linux
+        run: pytest -q -m integration tests/test_ce_export_integration.py
+
+      - name: Verify CE unchanged after Linux export operations
+        shell: bash
+        run: |
+          set -euo pipefail
+          ce="$EV4_CE_REPO"
+          git -C "$ce" rev-parse HEAD > "$RUNNER_TEMP/ce-head.after-export"
+          git -C "$ce" status --porcelain=v1 --untracked-files=all --ignored=matching > "$RUNNER_TEMP/ce-status.after-export"
+          git -C "$ce" ls-files -s > "$RUNNER_TEMP/ce-index.after-export"
+          cmp "$RUNNER_TEMP/ce-head.before" "$RUNNER_TEMP/ce-head.after-export"
+          cmp "$RUNNER_TEMP/ce-status.before" "$RUNNER_TEMP/ce-status.after-export"
+          cmp "$RUNNER_TEMP/ce-index.before" "$RUNNER_TEMP/ce-index.after-export"
 
       - name: Run platform-independent Workbench regression suite
         run: pytest -q
@@ -126,11 +137,9 @@ jobs:
           set -euo pipefail
           ce="$EV4_CE_REPO"
           git -C "$ce" rev-parse HEAD > "$RUNNER_TEMP/ce-head.final"
-          git -C "$ce" branch --show-current > "$RUNNER_TEMP/ce-branch.final"
-          git -C "$ce" status --porcelain=v1 --untracked-files=all > "$RUNNER_TEMP/ce-status.final"
+          git -C "$ce" status --porcelain=v1 --untracked-files=all --ignored=matching > "$RUNNER_TEMP/ce-status.final"
           git -C "$ce" ls-files -s > "$RUNNER_TEMP/ce-index.final"
           cmp "$RUNNER_TEMP/ce-head.before" "$RUNNER_TEMP/ce-head.final"
-          cmp "$RUNNER_TEMP/ce-branch.before" "$RUNNER_TEMP/ce-branch.final"
           cmp "$RUNNER_TEMP/ce-status.before" "$RUNNER_TEMP/ce-status.final"
           cmp "$RUNNER_TEMP/ce-index.before" "$RUNNER_TEMP/ce-index.final"
           git diff --check
@@ -159,22 +168,21 @@ jobs:
           git config --global core.autocrlf false
           git config --global core.eol lf
 
-      - name: Checkout named repaired CE branch
+      - name: Checkout current CE main reference
         uses: actions/checkout@v4
         with:
           repository: rezahh107/EV4-Constructability-Engineer-Repo
-          ref: ${{ env.CE_REQUIRED_BRANCH }}
+          ref: ${{ env.CE_REFERENCE_BRANCH }}
           path: EV4-Constructability-Engineer-Repo
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Assert exact named clean CE dependency and immutable bytes
+      - name: Assert selected current-main exact CE dependency and immutable bytes
         shell: pwsh
         run: |
           $ce = Join-Path $env:GITHUB_WORKSPACE "EV4-Constructability-Engineer-Repo"
-          git -C $ce switch -C $env:CE_REQUIRED_BRANCH $env:CE_REQUIRED_SHA
-          if ((git -C $ce rev-parse HEAD) -ne $env:CE_REQUIRED_SHA) { throw "CE evidence lock invalidated" }
-          if ((git -C $ce branch --show-current) -ne $env:CE_REQUIRED_BRANCH) { throw "CE named branch mismatch" }
+          if ((git -C $ce rev-parse HEAD) -ne $env:CE_REQUIRED_SHA) { throw "CE current-main evidence lock invalidated" }
+          if ((git -C $ce branch --show-current) -ne $env:CE_REFERENCE_BRANCH) { throw "CE reference branch mismatch" }
           if ((git -C $ce remote get-url origin) -ne "https://github.com/rezahh107/EV4-Constructability-Engineer-Repo") { throw "CE remote mismatch" }
           $producer = (Get-FileHash -Algorithm SHA256 (Join-Path $ce "contracts/project-gate/producer-gate-export.v1.schema.json")).Hash.ToLowerInvariant()
           $bundle = (Get-FileHash -Algorithm SHA256 (Join-Path $ce "contracts/project-gate/stage-bundle.v1.schema.json")).Hash.ToLowerInvariant()
@@ -192,8 +200,7 @@ jobs:
           $ce = $env:EV4_CE_REPO
           [ordered]@{
             head = (git -C $ce rev-parse HEAD)
-            branch = (git -C $ce branch --show-current)
-            status = @(git -C $ce status --porcelain=v1 --untracked-files=all)
+            status = @(git -C $ce status --porcelain=v1 --untracked-files=all --ignored=matching)
             index = @(git -C $ce ls-files -s)
           } | ConvertTo-Json -Compress | Set-Content -NoNewline (Join-Path $env:RUNNER_TEMP "ce-before.json")
 
@@ -211,11 +218,11 @@ jobs:
       - name: Compile production and tests
         run: python -m compileall -q src tests
 
-      - name: Run Profile lock, preflight, registry, transport, snapshot, and import-boundary tests
+      - name: Run Profile lock preflight registry transport snapshot and import-boundary tests
         run: |
           pytest -q tests/test_ce_preflight.py tests/test_profile_registry.py tests/test_ce_profile_lock.py tests/test_strict_json.py tests/test_process_transport.py tests/test_attempts.py tests/test_parent_import_boundary.py
 
-      - name: Run exact CE connection and fresh-interpreter integration
+      - name: Run exact CE connection and fresh isolated interpreter integration
         run: pytest -q -m integration tests/test_ce_connection_integration.py
 
       - name: Verify CE unchanged after connection operations
@@ -224,14 +231,13 @@ jobs:
           $ce = $env:EV4_CE_REPO
           $current = [ordered]@{
             head = (git -C $ce rev-parse HEAD)
-            branch = (git -C $ce branch --show-current)
-            status = @(git -C $ce status --porcelain=v1 --untracked-files=all)
+            status = @(git -C $ce status --porcelain=v1 --untracked-files=all --ignored=matching)
             index = @(git -C $ce ls-files -s)
           } | ConvertTo-Json -Compress
           $before = Get-Content -Raw (Join-Path $env:RUNNER_TEMP "ce-before.json")
           if ($current -ne $before) { throw "CE state changed during connection operations" }
 
-      - name: Run official CE authorized, blocked, invalid, and prewrite integration
+      - name: Run official CE authorized blocked invalid and prewrite integration
         run: pytest -q -m integration tests/test_ce_export_integration.py
 
       - name: Verify CE unchanged after export operations
@@ -240,8 +246,7 @@ jobs:
           $ce = $env:EV4_CE_REPO
           $current = [ordered]@{
             head = (git -C $ce rev-parse HEAD)
-            branch = (git -C $ce branch --show-current)
-            status = @(git -C $ce status --porcelain=v1 --untracked-files=all)
+            status = @(git -C $ce status --porcelain=v1 --untracked-files=all --ignored=matching)
             index = @(git -C $ce ls-files -s)
           } | ConvertTo-Json -Compress
           $before = Get-Content -Raw (Join-Path $env:RUNNER_TEMP "ce-before.json")
@@ -259,8 +264,7 @@ jobs:
           $ce = $env:EV4_CE_REPO
           $current = [ordered]@{
             head = (git -C $ce rev-parse HEAD)
-            branch = (git -C $ce branch --show-current)
-            status = @(git -C $ce status --porcelain=v1 --untracked-files=all)
+            status = @(git -C $ce status --porcelain=v1 --untracked-files=all --ignored=matching)
             index = @(git -C $ce ls-files -s)
           } | ConvertTo-Json -Compress
           $before = Get-Content -Raw (Join-Path $env:RUNNER_TEMP "ce-before.json")
