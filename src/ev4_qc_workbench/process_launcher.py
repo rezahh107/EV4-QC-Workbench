@@ -33,8 +33,32 @@ class ProcessLaunchError(RuntimeError):
         self.child_pid = child_pid
 
 
-def _source_root() -> str:
-    return str(Path(__file__).resolve().parents[1])
+def _child_environment() -> dict[str, str]:
+    environment = os.environ.copy()
+    environment.pop("PYTHONPATH", None)
+    environment["PYTHONNOUSERSITE"] = "1"
+    return environment
+
+
+def _child_command(
+    *,
+    child_module: str,
+    request_path: Path,
+    result_path: Path,
+    pycache_path: Path,
+) -> list[str]:
+    return [
+        sys.executable,
+        "-I",
+        "-X",
+        f"pycache_prefix={pycache_path}",
+        "-m",
+        child_module,
+        "--request",
+        str(request_path),
+        "--result",
+        str(result_path),
+    ]
 
 
 def _validate_result(
@@ -105,20 +129,16 @@ def launch_profile_operation(
         folder = Path(temporary)
         request_path = folder / "request.json"
         result_path = folder / "result.json"
+        pycache_path = folder / "pycache"
+        pycache_path.mkdir()
         write_json(request_path, request, max_bytes=MAX_REQUEST_BYTES)
-        environment = os.environ.copy()
-        current = environment.get("PYTHONPATH")
-        environment["PYTHONPATH"] = _source_root() if not current else _source_root() + os.pathsep + current
-        environment["PYTHONNOUSERSITE"] = "1"
-        command = [
-            sys.executable,
-            "-m",
-            child_module,
-            "--request",
-            str(request_path),
-            "--result",
-            str(result_path),
-        ]
+        environment = _child_environment()
+        command = _child_command(
+            child_module=child_module,
+            request_path=request_path,
+            result_path=result_path,
+            pycache_path=pycache_path,
+        )
         try:
             completed = subprocess.run(
                 command,
